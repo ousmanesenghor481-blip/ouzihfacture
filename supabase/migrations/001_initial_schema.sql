@@ -123,14 +123,14 @@ BEGIN
   INSERT INTO public.profiles (id, full_name, email)
   VALUES (
     NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'full_name', 'Utilisateur'),
+    COALESCE(NEW.raw_user_meta_data->>'full_name', 'Ousmane Senghor'),
     NEW.email
   );
 
   INSERT INTO public.company_settings (user_id, company_name, company_email)
   VALUES (
     NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'company_name', 'Mon Entreprise'),
+    COALESCE(NEW.raw_user_meta_data->>'company_name', 'Ouzih Business'),
     NEW.email
   );
 
