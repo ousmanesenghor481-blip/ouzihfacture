@@ -60,6 +60,8 @@ export interface CompanySettings {
   currency: string;
   invoice_prefix: string;
   next_invoice_number: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface DashboardStats {
