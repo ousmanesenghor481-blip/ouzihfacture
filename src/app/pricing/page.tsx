@@ -1,23 +1,16 @@
 'use client';
 
 import { PLANS, PlanKey } from '@/lib/plan';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function PricingPage() {
   const router = useRouter();
-  const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState<PlanKey | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [debugLog, setDebugLog] = useState<string>('Composant PricingPage prêt. En attente d\'action...');
 
-  useEffect(() => {
-    setMounted(true);
-    console.log('[Pricing Page] Composant monté côté client avec succès.');
-  }, []);
-
   async function handleSubscribe(planKey: PlanKey) {
-    // 1. Immediate Alert & Console Log test
     console.log('=== [Pricing Page] HANDLE SUBSCRIBE DÉCLENCHÉ ===', planKey);
     const timeStr = new Date().toLocaleTimeString();
     setDebugLog(`[${timeStr}] Clic détecté sur le plan: "${planKey}". Initialisation...`);
@@ -67,14 +60,6 @@ export default function PricingPage() {
     } finally {
       setLoading(null);
     }
-  }
-
-  if (!mounted) {
-    return (
-      <div className="max-w-4xl mx-auto py-12 px-4 text-center">
-        <p className="text-gray-500">Chargement de la page des tarifs...</p>
-      </div>
-    );
   }
 
   return (
