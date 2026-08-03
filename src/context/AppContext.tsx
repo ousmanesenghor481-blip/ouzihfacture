@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import type { Invoice, Client, CompanySettings, DashboardStats } from "@/types";
 import { createClient } from "@/lib/supabase/client";
+import { checkInvoiceQuota, checkClientQuota } from "@/lib/quotas";
 
 interface AppContextType {
   invoices: Invoice[];
@@ -143,6 +144,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   async function addInvoice(newInvData: Omit<Invoice, "id" | "created_at" | "updated_at">): Promise<Invoice> {
+    if (userId) {
+      const quotaCheck = await checkInvoiceQuota(userId);
+      if (!quotaCheck.allowed) {
+        throw new Error(quotaCheck.error || "Limite de factures atteinte.");
+      }
+    }
+
     const tempId = `inv-${Date.now()}`;
     const now = new Date().toISOString();
     const newInvoice: Invoice = {
@@ -249,6 +257,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   async function addClient(newClientData: Omit<Client, "id" | "created_at" | "updated_at">): Promise<Client> {
+    if (userId) {
+      const quotaCheck = await checkClientQuota(userId);
+      if (!quotaCheck.allowed) {
+        throw new Error(quotaCheck.error || "Limite de clients atteinte.");
+      }
+    }
+
     const tempId = `client-${Date.now()}`;
     const now = new Date().toISOString();
     const newClient: Client = {

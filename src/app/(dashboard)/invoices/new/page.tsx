@@ -77,35 +77,45 @@ export default function NewInvoicePage() {
   const taxAmount = calculateTax(subtotal, TVA_RATE);
   const total = calculateTotal(subtotal, taxAmount);
 
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   async function handleSave(status: "brouillon" | "envoyee") {
-    const selectedClient = clients.find((c) => c.id === clientId);
-    const invoiceNumber = generateInvoiceNumber("FAC", invoices.length + 1);
+    setErrorMsg(null);
+    try {
+      const selectedClient = clients.find((c) => c.id === clientId);
+      const invoiceNumber = generateInvoiceNumber("FAC", invoices.length + 1);
 
-    const created = await addInvoice({
-      user_id: "user-001",
-      client_id: clientId || null,
-      client: selectedClient,
-      invoice_number: invoiceNumber,
-      status,
-      issue_date: issueDate,
-      due_date: dueDate,
-      subtotal,
-      tax_rate: TVA_RATE,
-      tax_amount: taxAmount,
-      total,
-      notes: notes || null,
-      items: items.map((i, index) => ({
-        id: `item-${index}`,
-        invoice_id: "",
-        description: i.description,
-        quantity: i.quantity,
-        unit_price: i.unit_price,
-        total: i.quantity * i.unit_price,
-        sort_order: index,
-      })),
-    });
+      const created = await addInvoice({
+        user_id: "user-001",
+        client_id: clientId || null,
+        client: selectedClient,
+        invoice_number: invoiceNumber,
+        status,
+        issue_date: issueDate,
+        due_date: dueDate,
+        subtotal,
+        tax_rate: TVA_RATE,
+        tax_amount: taxAmount,
+        total,
+        notes: notes || null,
+        items: items.map((i, index) => ({
+          id: `item-${index}`,
+          invoice_id: "",
+          description: i.description,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+          total: i.quantity * i.unit_price,
+          sort_order: index,
+        })),
+      });
 
-    router.push(`/invoices/${created.id}`);
+      router.push(`/invoices/${created.id}`);
+    } catch (err: any) {
+      console.error("Invoice creation error:", err);
+      const msg = err?.message || "Erreur lors de la création de la facture";
+      setErrorMsg(msg);
+      alert(msg);
+    }
   }
 
   return (
@@ -127,6 +137,15 @@ export default function NewInvoicePage() {
           </p>
         </div>
       </div>
+
+      {errorMsg && (
+        <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm shadow-sm animate-fade-in flex items-center justify-between">
+          <span>⚠️ {errorMsg}</span>
+          <Link href="/pricing" className="ml-4 font-bold underline hover:text-red-900">
+            Changer de plan →
+          </Link>
+        </div>
+      )}
 
       <div className="space-y-6">
         {/* Client & Dates */}

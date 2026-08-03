@@ -70,33 +70,38 @@ export default function ClientsPage() {
     setShowForm(true);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!formName.trim()) return;
 
-    if (editingClient) {
-      updateClient(editingClient.id, {
-        name: formName,
-        email: formEmail || null,
-        phone: formPhone || null,
-        address: formAddress || null,
-        city: formCity || null,
-        country: formCountry,
-      });
-    } else {
-      addClient({
-        user_id: "user-001",
-        name: formName,
-        email: formEmail || null,
-        phone: formPhone || null,
-        address: formAddress || null,
-        city: formCity || null,
-        country: formCountry,
-        notes: null,
-      });
-    }
+    try {
+      if (editingClient) {
+        await updateClient(editingClient.id, {
+          name: formName,
+          email: formEmail || null,
+          phone: formPhone || null,
+          address: formAddress || null,
+          city: formCity || null,
+          country: formCountry,
+        });
+      } else {
+        await addClient({
+          user_id: "user-001",
+          name: formName,
+          email: formEmail || null,
+          phone: formPhone || null,
+          address: formAddress || null,
+          city: formCity || null,
+          country: formCountry,
+          notes: null,
+        });
+      }
 
-    setShowForm(false);
-    resetForm();
+      setShowForm(false);
+      resetForm();
+    } catch (err: any) {
+      console.error("Client save error:", err);
+      alert(err?.message || "Erreur lors de l'enregistrement du client");
+    }
   }
 
   function handleDelete(id: string) {
