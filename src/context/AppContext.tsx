@@ -182,17 +182,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   async function addInvoice(newInvData: Omit<Invoice, "id" | "created_at" | "updated_at">): Promise<Invoice> {
-    if (userId) {
-      const quotaCheck = await checkInvoiceQuota(userId);
-      if (!quotaCheck.allowed) {
-        throw new Error(quotaCheck.error || "Limite de factures atteinte.");
-      }
+    const { data: { user } } = await supabase.auth.getUser();
+    const activeUserId = user?.id || userId;
+
+    if (!activeUserId) {
+      throw new Error("Utilisateur non connecté. Veuillez vous connecter pour créer une facture.");
     }
+
+    const quotaCheck = await checkInvoiceQuota(activeUserId);
+    if (!quotaCheck.allowed) {
+      throw new Error(quotaCheck.error || "Limite de factures atteinte.");
+    }
+
+    // Resolve tenant_id from profiles table or session user.id
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', activeUserId)
+      .maybeSingle();
+
+    const targetTenantId = profile?.id || activeUserId;
 
     const tempId = `inv-${Date.now()}`;
     const now = new Date().toISOString();
     const newInvoice: Invoice = {
       ...newInvData,
+      user_id: targetTenantId,
+      tenant_id: targetTenantId,
       id: tempId,
       created_at: now,
       updated_at: now,
@@ -201,60 +217,61 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // Immediate UI update
     setInvoices((prev) => [newInvoice, ...prev]);
 
-    if (userId) {
-      try {
-        const { data: dbInvoice, error: invErr } = await supabase
-          .from('invoices')
-          .insert({
-            user_id: userId,
-            tenant_id: userId,
-            client_id: newInvData.client_id || null,
-            invoice_number: newInvData.invoice_number,
-            status: newInvData.status,
-            issue_date: newInvData.issue_date,
-            due_date: newInvData.due_date,
-            subtotal: newInvData.subtotal,
-            tax_rate: newInvData.tax_rate,
-            tax_amount: newInvData.tax_amount,
-            total: newInvData.total,
-            notes: newInvData.notes || null,
-          })
-          .select()
-          .single();
+    try {
+      const { data: dbInvoice, error: invErr } = await supabase
+        .from('invoices')
+        .insert({
+          user_id: targetTenantId,
+          tenant_id: targetTenantId,
+          client_id: newInvData.client_id || null,
+          invoice_number: newInvData.invoice_number,
+          status: newInvData.status,
+          issue_date: newInvData.issue_date,
+          due_date: newInvData.due_date,
+          subtotal: newInvData.subtotal,
+          tax_rate: newInvData.tax_rate,
+          tax_amount: newInvData.tax_amount,
+          total: newInvData.total,
+          notes: newInvData.notes || null,
+        })
+        .select()
+        .single();
 
-        if (invErr) {
-          setInvoices((prev) => prev.filter((i) => i.id !== tempId));
-          console.error("Error inserting invoice into Supabase:", invErr);
-          const errStr = (invErr.message || '') + (invErr.details || '') + (invErr.hint || '');
-          if (errStr.includes('QUOTA_DEPASSE') || invErr.code === 'P0001') {
-            throw new Error('QUOTA_DEPASSE');
-          }
-          if (invErr.code === '42501' || errStr.toLowerCase().includes('row-level security') || errStr.toLowerCase().includes('rls')) {
-            throw new Error('RLS_VIOLATION: Refus de sécurité (RLS) - Tenant introuvable ou non autorisé.');
-          }
-          throw new Error(invErr.message || 'Erreur lors de la création de la facture');
-        }
-
-        if (dbInvoice) {
-          if (newInvData.items && newInvData.items.length > 0) {
-            const itemsToInsert = newInvData.items.map((item, idx) => ({
-              invoice_id: dbInvoice.id,
-              description: item.description,
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-              total: item.total,
-              sort_order: idx,
-            }));
-            await supabase.from('invoice_items').insert(itemsToInsert);
-          }
-          await fetchData();
-          return dbInvoice;
-        }
-      } catch (err: any) {
+      if (invErr) {
         setInvoices((prev) => prev.filter((i) => i.id !== tempId));
-        console.error("Error inserting invoice into Supabase:", err);
-        throw err;
+        console.error("Error inserting invoice into Supabase:", invErr);
+        const errStr = (invErr.message || '') + (invErr.details || '') + (invErr.hint || '');
+        if (errStr.includes('QUOTA_DEPASSE') || invErr.code === 'P0001') {
+          throw new Error('QUOTA_DEPASSE');
+        }
+        if (invErr.code === '23503' || errStr.includes('foreign key constraint')) {
+          throw new Error(`Erreur de clé étrangère (tenant_id) : L'identifiant tenant '${targetTenantId}' est invalide ou absent de la base.`);
+        }
+        if (invErr.code === '42501' || errStr.toLowerCase().includes('row-level security') || errStr.toLowerCase().includes('rls')) {
+          throw new Error('RLS_VIOLATION: Refus de sécurité (RLS) - Tenant introuvable ou non autorisé.');
+        }
+        throw new Error(invErr.message || 'Erreur lors de la création de la facture');
       }
+
+      if (dbInvoice) {
+        if (newInvData.items && newInvData.items.length > 0) {
+          const itemsToInsert = newInvData.items.map((item, idx) => ({
+            invoice_id: dbInvoice.id,
+            description: item.description,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            total: item.total,
+            sort_order: idx,
+          }));
+          await supabase.from('invoice_items').insert(itemsToInsert);
+        }
+        await fetchData();
+        return dbInvoice;
+      }
+    } catch (err: any) {
+      setInvoices((prev) => prev.filter((i) => i.id !== tempId));
+      console.error("Error inserting invoice into Supabase:", err);
+      throw err;
     }
 
     return newInvoice;
@@ -311,17 +328,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   async function addClient(newClientData: Omit<Client, "id" | "created_at" | "updated_at">): Promise<Client> {
-    if (userId) {
-      const quotaCheck = await checkClientQuota(userId);
-      if (!quotaCheck.allowed) {
-        throw new Error(quotaCheck.error || "Limite de clients atteinte.");
-      }
+    const { data: { user } } = await supabase.auth.getUser();
+    const activeUserId = user?.id || userId;
+
+    if (!activeUserId) {
+      throw new Error("Utilisateur non connecté. Veuillez vous connecter pour enregistrer un client.");
     }
+
+    const quotaCheck = await checkClientQuota(activeUserId);
+    if (!quotaCheck.allowed) {
+      throw new Error(quotaCheck.error || "Limite de clients atteinte.");
+    }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', activeUserId)
+      .maybeSingle();
+
+    const targetTenantId = profile?.id || activeUserId;
 
     const tempId = `client-${Date.now()}`;
     const now = new Date().toISOString();
     const newClient: Client = {
       ...newClientData,
+      user_id: targetTenantId,
+      tenant_id: targetTenantId,
       id: tempId,
       created_at: now,
       updated_at: now,
@@ -329,43 +361,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     setClients((prev) => [newClient, ...prev]);
 
-    if (userId) {
-      try {
-        const { data: dbClient, error } = await supabase
-          .from('clients')
-          .insert({
-            user_id: userId,
-            tenant_id: userId,
-            name: newClientData.name,
-            email: newClientData.email || null,
-            phone: newClientData.phone || null,
-            address: newClientData.address || null,
-            city: newClientData.city || null,
-            country: newClientData.country || "Côte d'Ivoire",
-            notes: newClientData.notes || null,
-          })
-          .select()
-          .single();
+    try {
+      const { data: dbClient, error } = await supabase
+        .from('clients')
+        .insert({
+          user_id: targetTenantId,
+          tenant_id: targetTenantId,
+          name: newClientData.name,
+          email: newClientData.email || null,
+          phone: newClientData.phone || null,
+          address: newClientData.address || null,
+          city: newClientData.city || null,
+          country: newClientData.country || "Côte d'Ivoire",
+          notes: newClientData.notes || null,
+        })
+        .select()
+        .single();
 
-        if (error) {
-          setClients((prev) => prev.filter((c) => c.id !== tempId));
-          console.error("Error adding client to Supabase:", error);
-          const errStr = (error.message || '') + (error.details || '');
-          if (error.code === '42501' || errStr.toLowerCase().includes('row-level security') || errStr.toLowerCase().includes('rls')) {
-            throw new Error('RLS_VIOLATION: Refus de sécurité (RLS) - Tenant introuvable ou non autorisé.');
-          }
-          throw new Error(error.message || "Erreur lors de la création du client");
-        }
-
-        if (dbClient) {
-          await fetchData();
-          return dbClient;
-        }
-      } catch (err: any) {
+      if (error) {
         setClients((prev) => prev.filter((c) => c.id !== tempId));
-        console.error("Error adding client to Supabase:", err);
-        throw err;
+        console.error("Error adding client to Supabase:", error);
+        const errStr = (error.message || '') + (error.details || '');
+        if (error.code === '23503' || errStr.includes('foreign key constraint')) {
+          throw new Error(`Erreur de clé étrangère (tenant_id) : L'identifiant tenant '${targetTenantId}' est invalide ou absent de la base.`);
+        }
+        if (error.code === '42501' || errStr.toLowerCase().includes('row-level security') || errStr.toLowerCase().includes('rls')) {
+          throw new Error('RLS_VIOLATION: Refus de sécurité (RLS) - Tenant introuvable ou non autorisé.');
+        }
+        throw new Error(error.message || "Erreur lors de la création du client");
       }
+
+      if (dbClient) {
+        await fetchData();
+        return dbClient;
+      }
+    } catch (err: any) {
+      setClients((prev) => prev.filter((c) => c.id !== tempId));
+      console.error("Error adding client to Supabase:", err);
+      throw err;
     }
 
     return newClient;
