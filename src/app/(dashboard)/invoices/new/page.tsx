@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -10,6 +10,7 @@ import {
   Save,
   Send,
   Calculator,
+  Lock,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils/format";
 import {
@@ -23,6 +24,9 @@ import { TVA_RATE } from "@/lib/constants";
 import { cn } from "@/lib/utils/cn";
 import { useApp } from "@/context/AppContext";
 import { QuotaExceededModal } from "@/components/modals/QuotaExceededModal";
+import { createClient } from "@/lib/supabase/client";
+import { getTenantQuota } from "@/lib/tenantQuotas";
+import { checkInvoiceQuota } from "@/lib/quotas";
 
 interface LineItem {
   id: string;
@@ -34,6 +38,9 @@ interface LineItem {
 export default function NewInvoicePage() {
   const router = useRouter();
   const { clients, invoices, addInvoice } = useApp();
+
+  const [isCheckingQuota, setIsCheckingQuota] = useState(true);
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
 
   const [clientId, setClientId] = useState("");
   const [issueDate, setIssueDate] = useState(
@@ -48,6 +55,65 @@ export default function NewInvoicePage() {
   const [items, setItems] = useState<LineItem[]>([
     { id: "1", description: "", quantity: 1, unit_price: 0 },
   ]);
+
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
+
+  // 1. Verify Quota on Load (Fetching tenant_id from profiles table)
+  useEffect(() => {
+    async function verifyQuotaOnLoad() {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+          setIsCheckingQuota(false);
+          return;
+        }
+
+        // Always fetch tenant_id from profiles table
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("tenant_id")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        const tenantId = profile?.tenant_id || user.id;
+
+        // Check tenant_quotas from DB (ex: 5/5 factures)
+        const tenantQuota = await getTenantQuota(tenantId);
+        const isDbQuotaExceeded =
+          tenantQuota.max_invoices > 0 &&
+          tenantQuota.invoices_used >= tenantQuota.max_invoices;
+
+        // Check monthly / plan quota
+        const monthlyQuotaCheck = await checkInvoiceQuota(user.id);
+        const isMonthlyExceeded = !monthlyQuotaCheck.allowed;
+
+        if (isDbQuotaExceeded || isMonthlyExceeded) {
+          console.warn(
+            "[NewInvoicePage] Quota de factures atteint pour le tenant:",
+            tenantId,
+            ". Redirection automatique vers /pricing..."
+          );
+          setIsQuotaExceeded(true);
+          setShowQuotaModal(true);
+
+          // Automatic redirection to /pricing
+          setTimeout(() => {
+            router.push("/pricing?reason=quota_exceeded");
+          }, 1500);
+          return;
+        }
+      } catch (err) {
+        console.error("[NewInvoicePage] Erreur lors de la vérification du quota:", err);
+      } finally {
+        setIsCheckingQuota(false);
+      }
+    }
+
+    verifyQuotaOnLoad();
+  }, [router]);
 
   function addLine() {
     setItems([
@@ -78,10 +144,13 @@ export default function NewInvoicePage() {
   const taxAmount = calculateTax(subtotal, TVA_RATE);
   const total = calculateTotal(subtotal, taxAmount);
 
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [showQuotaModal, setShowQuotaModal] = useState(false);
-
   async function handleSave(status: "brouillon" | "envoyee") {
+    if (isQuotaExceeded) {
+      setShowQuotaModal(true);
+      router.push("/pricing?reason=quota_exceeded");
+      return;
+    }
+
     setErrorMsg(null);
     try {
       const selectedClient = clients.find((c) => c.id === clientId);
@@ -120,11 +189,53 @@ export default function NewInvoicePage() {
         msg.includes("Limite") ||
         msg.includes("quota")
       ) {
+        setIsQuotaExceeded(true);
         setShowQuotaModal(true);
+        setTimeout(() => {
+          router.push("/pricing?reason=quota_exceeded");
+        }, 1500);
         return;
       }
       setErrorMsg(msg || "Erreur lors de la création de la facture");
     }
+  }
+
+  if (isCheckingQuota) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] text-gray-500 gap-3">
+        <div className="w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-sm font-medium">Vérification des quotas en cours...</p>
+      </div>
+    );
+  }
+
+  if (isQuotaExceeded) {
+    return (
+      <div className="max-w-2xl mx-auto py-16 text-center animate-fade-in space-y-6">
+        <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto">
+          <Lock className="w-8 h-8" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Limite de factures atteinte</h1>
+          <p className="text-sm text-gray-500 mt-2">
+            Votre entreprise a atteint sa limite de factures gratuites. Vous allez être redirigé vers la page de mise à niveau...
+          </p>
+        </div>
+        <div className="flex items-center justify-center gap-4 pt-4">
+          <Link
+            href="/pricing"
+            className="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold text-sm rounded-xl shadow-lg transition-all"
+          >
+            Passer à un plan supérieur maintenant
+          </Link>
+        </div>
+
+        <QuotaExceededModal
+          isOpen={showQuotaModal}
+          onClose={() => router.push("/pricing")}
+        />
+      </div>
+    );
   }
 
   return (
@@ -413,7 +524,7 @@ export default function NewInvoicePage() {
       {/* Quota Exceeded Blocking Modal */}
       <QuotaExceededModal
         isOpen={showQuotaModal}
-        onClose={() => setShowQuotaModal(false)}
+        onClose={() => router.push("/pricing")}
       />
     </div>
   );

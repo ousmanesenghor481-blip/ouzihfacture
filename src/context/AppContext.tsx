@@ -182,19 +182,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   async function addInvoice(newInvData: Omit<Invoice, "id" | "created_at" | "updated_at">): Promise<Invoice> {
+    // 1. Récupère l'utilisateur :
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       throw new Error("Utilisateur non connecté. Veuillez vous connecter pour créer une facture.");
     }
 
-    // 1. Fetch real tenant_id from profiles table
-    const { data: profile } = await supabase
+    // 2. Récupère le tenant_id de cet utilisateur dans la table profiles :
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('tenant_id')
       .eq('id', user.id)
-      .maybeSingle();
+      .single();
 
-    const targetTenantId = profile?.tenant_id || user.id;
+    // 3. Vérifie que le tenant_id existe :
+    if (profileError || !profile || !profile.tenant_id) {
+      throw new Error("Impossible de trouver le tenant_id de l'utilisateur.");
+    }
 
     const quotaCheck = await checkInvoiceQuota(user.id);
     if (!quotaCheck.allowed) {
@@ -206,7 +210,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const newInvoice: Invoice = {
       ...newInvData,
       user_id: user.id,
-      tenant_id: targetTenantId,
+      tenant_id: profile.tenant_id,
       id: tempId,
       created_at: now,
       updated_at: now,
@@ -216,11 +220,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setInvoices((prev) => [newInvoice, ...prev]);
 
     try {
+      // 4. Insère la facture en utilisant EXPLICITEMENT ce tenant_id :
       const { data: dbInvoice, error: invErr } = await supabase
         .from('invoices')
         .insert({
           user_id: user.id,
-          tenant_id: targetTenantId,
+          tenant_id: profile.tenant_id,
           client_id: newInvData.client_id || null,
           invoice_number: newInvData.invoice_number,
           status: newInvData.status,
@@ -243,7 +248,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           throw new Error('QUOTA_DEPASSE');
         }
         if (invErr.code === '23503' || errStr.includes('foreign key constraint')) {
-          throw new Error(`Erreur de clé étrangère (tenant_id) : L'identifiant tenant '${targetTenantId}' est invalide ou absent de la base.`);
+          throw new Error(`Erreur de clé étrangère (tenant_id) : L'identifiant tenant '${profile.tenant_id}' est invalide ou absent de la base.`);
         }
         if (invErr.code === '42501' || errStr.toLowerCase().includes('row-level security') || errStr.toLowerCase().includes('rls')) {
           throw new Error('RLS_VIOLATION: Refus de sécurité (RLS) - Tenant introuvable ou non autorisé.');
@@ -326,18 +331,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   async function addClient(newClientData: Omit<Client, "id" | "created_at" | "updated_at">): Promise<Client> {
+    // 1. Récupère l'utilisateur :
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       throw new Error("Utilisateur non connecté. Veuillez vous connecter pour enregistrer un client.");
     }
 
-    const { data: profile } = await supabase
+    // 2. Récupère le tenant_id de cet utilisateur dans la table profiles :
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('tenant_id')
       .eq('id', user.id)
-      .maybeSingle();
+      .single();
 
-    const targetTenantId = profile?.tenant_id || user.id;
+    // 3. Vérifie que le tenant_id existe :
+    if (profileError || !profile || !profile.tenant_id) {
+      throw new Error("Impossible de trouver le tenant_id de l'utilisateur.");
+    }
 
     const quotaCheck = await checkClientQuota(user.id);
     if (!quotaCheck.allowed) {
@@ -349,7 +359,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const newClient: Client = {
       ...newClientData,
       user_id: user.id,
-      tenant_id: targetTenantId,
+      tenant_id: profile.tenant_id,
       id: tempId,
       created_at: now,
       updated_at: now,
@@ -358,11 +368,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setClients((prev) => [newClient, ...prev]);
 
     try {
+      // 4. Insère le client en utilisant EXPLICITEMENT ce tenant_id :
       const { data: dbClient, error } = await supabase
         .from('clients')
         .insert({
           user_id: user.id,
-          tenant_id: targetTenantId,
+          tenant_id: profile.tenant_id,
           name: newClientData.name,
           email: newClientData.email || null,
           phone: newClientData.phone || null,
