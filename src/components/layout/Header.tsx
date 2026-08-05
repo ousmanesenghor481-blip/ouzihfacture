@@ -70,6 +70,18 @@ export function Header() {
           <span className="absolute top-1.5 right-1.5 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
         </button>
 
+        {/* SaaS Admin Portal Button (Owner Only) */}
+        {userEmail.toLowerCase() === 'ousmanesenghor481@gmail.com' && (
+          <button
+            onClick={() => router.push('/admin')}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold text-xs rounded-xl shadow-md transition-all border border-slate-800"
+            title="Accéder au panneau Admin SaaS"
+          >
+            <span>👑</span>
+            <span className="hidden md:inline">Admin SaaS</span>
+          </button>
+        )}
+
         <div className="w-px h-8 bg-gray-200 hidden sm:block"></div>
 
         {/* User Profile & Logout */}
