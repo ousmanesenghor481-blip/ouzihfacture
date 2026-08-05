@@ -207,6 +207,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .from('invoices')
           .insert({
             user_id: userId,
+            tenant_id: userId,
             client_id: newInvData.client_id || null,
             invoice_number: newInvData.invoice_number,
             status: newInvData.status,
@@ -227,6 +228,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const errStr = (invErr.message || '') + (invErr.details || '') + (invErr.hint || '');
           if (errStr.includes('QUOTA_DEPASSE') || invErr.code === 'P0001') {
             throw new Error('QUOTA_DEPASSE');
+          }
+          if (invErr.code === '42501' || errStr.toLowerCase().includes('row-level security') || errStr.toLowerCase().includes('rls')) {
+            throw new Error('RLS_VIOLATION: Refus de sécurité (RLS) - Tenant introuvable ou non autorisé.');
           }
           throw new Error(invErr.message || 'Erreur lors de la création de la facture');
         }
@@ -331,6 +335,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .from('clients')
           .insert({
             user_id: userId,
+            tenant_id: userId,
             name: newClientData.name,
             email: newClientData.email || null,
             phone: newClientData.phone || null,
@@ -342,12 +347,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .select()
           .single();
 
-        if (dbClient && !error) {
+        if (error) {
+          setClients((prev) => prev.filter((c) => c.id !== tempId));
+          console.error("Error adding client to Supabase:", error);
+          const errStr = (error.message || '') + (error.details || '');
+          if (error.code === '42501' || errStr.toLowerCase().includes('row-level security') || errStr.toLowerCase().includes('rls')) {
+            throw new Error('RLS_VIOLATION: Refus de sécurité (RLS) - Tenant introuvable ou non autorisé.');
+          }
+          throw new Error(error.message || "Erreur lors de la création du client");
+        }
+
+        if (dbClient) {
           await fetchData();
           return dbClient;
         }
-      } catch (err) {
+      } catch (err: any) {
+        setClients((prev) => prev.filter((c) => c.id !== tempId));
         console.error("Error adding client to Supabase:", err);
+        throw err;
       }
     }
 

@@ -7,6 +7,7 @@ export type InvoiceStatus = 'brouillon' | 'envoyee' | 'payee' | 'en_retard';
 export interface Client {
   id: string;
   user_id: string;
+  tenant_id?: string | null;
   name: string;
   email: string | null;
   phone: string | null;
@@ -31,6 +32,7 @@ export interface InvoiceItem {
 export interface Invoice {
   id: string;
   user_id: string;
+  tenant_id?: string | null;
   client_id: string | null;
   client?: Client;
   invoice_number: string;
