@@ -1,20 +1,25 @@
 -- ==============================================================================
--- OuzihFacture — SCRIPT SQL COMPLET AVEC SLUG À COPIER/COLLER DANS SUPABASE
+-- OuzihFacture — SCRIPT SQL COMPLET AVEC SLUG ET OWNER_USER_ID (SUPABASE)
 -- ==============================================================================
 
--- 1. S'assurer que la table tenants existe avec la colonne slug
+-- 1. S'assurer que la table tenants existe avec toutes les colonnes requises
 CREATE TABLE IF NOT EXISTS public.tenants (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL DEFAULT 'Mon Entreprise',
   slug TEXT NOT NULL UNIQUE,
+  owner_user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Ajouter la colonne owner_user_id au cas où la table existait déjà sans elle
+ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS owner_user_id UUID;
+ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS slug TEXT;
+
 -- 2. S'assurer que la colonne tenant_id existe dans profiles
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS tenant_id UUID;
 
--- 3. Attribuer un tenant_id à tous les comptes existants qui n'en ont pas (avec slug valide)
+-- 3. Rattrapage (backfill) pour tous les comptes existants sans tenant_id
 DO $$
 DECLARE
   rec RECORD;
@@ -23,10 +28,13 @@ BEGIN
   FOR rec IN SELECT id, full_name, email FROM public.profiles WHERE tenant_id IS NULL LOOP
     v_generated_slug := lower(regexp_replace(COALESCE(rec.full_name, 'entreprise'), '[^a-zA-Z0-9]+', '-', 'g'))
                         || '-' || substring(rec.id::text, 1, 8);
+    v_generated_slug := trim(both '-' from v_generated_slug);
 
-    INSERT INTO public.tenants (id, name, slug)
-    VALUES (rec.id, COALESCE(rec.full_name, 'Entreprise'), v_generated_slug)
-    ON CONFLICT (id) DO NOTHING;
+    INSERT INTO public.tenants (id, name, slug, owner_user_id)
+    VALUES (rec.id, COALESCE(rec.full_name, 'Entreprise'), v_generated_slug, rec.id)
+    ON CONFLICT (id) DO UPDATE SET
+      owner_user_id = EXCLUDED.owner_user_id,
+      slug = COALESCE(public.tenants.slug, EXCLUDED.slug);
 
     UPDATE public.profiles
     SET tenant_id = rec.id
@@ -44,7 +52,7 @@ CREATE POLICY "Allow all for authenticated on tenants" ON public.tenants FOR ALL
 DROP POLICY IF EXISTS "Allow all for authenticated on profiles" ON public.profiles;
 CREATE POLICY "Allow all for authenticated on profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
 
--- 5. Créer la fonction PL/pgSQL avec génération automatique du SLUG
+-- 5. Créer la fonction PL/pgSQL avec TOUTES les colonnes obligatoires (id, name, slug, owner_user_id)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -66,10 +74,13 @@ BEGIN
             || '-' || substring(v_tenant_id::text, 1, 8);
   v_slug := trim(both '-' from v_slug);
 
-  -- Étape A : Insérer dans la table tenants avec slug OBLIGATOIRE
-  INSERT INTO public.tenants (id, name, slug)
-  VALUES (v_tenant_id, v_company_name, v_slug)
-  ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug;
+  -- Étape A : Insérer dans la table tenants (id, name, slug, owner_user_id)
+  INSERT INTO public.tenants (id, name, slug, owner_user_id)
+  VALUES (v_tenant_id, v_company_name, v_slug, NEW.id)
+  ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    owner_user_id = EXCLUDED.owner_user_id;
 
   -- Étape B : Insérer dans la table profiles avec tenant_id OBLIGATOIRE
   INSERT INTO public.profiles (id, full_name, email, role, tenant_id)
