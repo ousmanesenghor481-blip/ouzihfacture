@@ -1,8 +1,8 @@
 -- ==============================================================================
--- OuzihFacture — SCRIPT SQL BULLETPROOF POUR LE TRIGGER D'INSCRIPTION SUPABASE
+-- OUZIHFACTURE — SCRIPT SQL BULLETPROOF ET ETANCHE POUR TRIGGER & BACKFILL SUPABASE
 -- ==============================================================================
 
--- 1. Structure de la table tenants
+-- 1. Structure de la table tenants (avec id, name, slug, owner_user_id)
 CREATE TABLE IF NOT EXISTS public.tenants (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL DEFAULT 'Mon Entreprise',
@@ -12,13 +12,13 @@ CREATE TABLE IF NOT EXISTS public.tenants (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Garantir la présence de toutes les colonnes
+-- S'assurer que toutes les colonnes existent
 ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT 'Mon Entreprise';
 ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS slug TEXT;
 ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS owner_user_id UUID;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS tenant_id UUID;
 
--- 2. Rattrapage (Backfill) pour tous les comptes existants
+-- 2. Rattrapage (Backfill) infaillible de tous les profils orphelins (tenant_id IS NULL)
 DO $$
 DECLARE
   rec RECORD;
@@ -32,6 +32,7 @@ BEGIN
     END IF;
     v_backfill_slug := v_backfill_slug || '-' || replace(rec.id::text, '-', '');
 
+    -- Insertion explicite des 4 champs obligatoires : id, name, slug, owner_user_id
     INSERT INTO public.tenants (id, name, slug, owner_user_id)
     VALUES (rec.id, COALESCE(rec.full_name, 'Mon Entreprise'), v_backfill_slug, rec.id)
     ON CONFLICT (id) DO UPDATE SET
@@ -55,7 +56,7 @@ CREATE POLICY "Allow all for authenticated on tenants" ON public.tenants FOR ALL
 DROP POLICY IF EXISTS "Allow all for authenticated on profiles" ON public.profiles;
 CREATE POLICY "Allow all for authenticated on profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
 
--- 4. Fonction PL/pgSQL avec sécurité d'exception pour éviter toute erreur HTTP 500
+-- 4. Trigger PL/pgSQL complet avec SECURITY DEFINER et 4 champs obligatoires
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -72,7 +73,7 @@ BEGIN
   v_company_name := COALESCE(NEW.raw_user_meta_data->>'company_name', 'Mon Entreprise');
   v_full_name := COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email);
 
-  -- Construction d'un SLUG unique et valide (sans caractères spéciaux, non NULL)
+  -- Slugification dynamique et nettoyée de tout caractère spécial
   v_slug := lower(regexp_replace(v_company_name, '[^a-zA-Z0-9]+', '-', 'g'));
   v_slug := trim(both '-' from v_slug);
   IF v_slug IS NULL OR v_slug = '' THEN
@@ -81,7 +82,7 @@ BEGIN
   v_slug := v_slug || '-' || replace(v_tenant_id::text, '-', '');
 
   BEGIN
-    -- Étape 1 : Insertion obligatoire dans tenants (id, name, slug, owner_user_id)
+    -- Étape A : Insertion explicite des 4 champs obligatoires : (id, name, slug, owner_user_id)
     INSERT INTO public.tenants (id, name, slug, owner_user_id)
     VALUES (v_tenant_id, v_company_name, v_slug, v_tenant_id)
     ON CONFLICT (id) DO UPDATE SET
@@ -89,7 +90,7 @@ BEGIN
       slug = EXCLUDED.slug,
       owner_user_id = EXCLUDED.owner_user_id;
 
-    -- Étape 2 : Insertion dans profiles avec tenant_id
+    -- Étape B : Insertion dans profiles avec tenant_id
     INSERT INTO public.profiles (id, full_name, email, role, tenant_id)
     VALUES (NEW.id, v_full_name, NEW.email, 'owner', v_tenant_id)
     ON CONFLICT (id) DO UPDATE SET
@@ -97,12 +98,12 @@ BEGIN
       full_name = EXCLUDED.full_name,
       email = EXCLUDED.email;
 
-    -- Étape 3 : Insertion dans company_settings
+    -- Étape C : Insertion dans company_settings
     INSERT INTO public.company_settings (user_id, company_name, company_email)
     VALUES (NEW.id, v_company_name, NEW.email)
     ON CONFLICT (user_id) DO NOTHING;
 
-    -- Étape 4 : Insertion dans tenant_quotas
+    -- Étape D : Insertion dans tenant_quotas
     INSERT INTO public.tenant_quotas (user_id, tenant_id, max_invoices, invoices_used)
     VALUES (NEW.id, v_tenant_id, 5, 0)
     ON CONFLICT (user_id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id;
@@ -115,7 +116,7 @@ BEGIN
 END;
 $$;
 
--- 5. Attachement du Trigger sur auth.users
+-- 5. Attachement du Trigger sur auth.users (AFTER INSERT)
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users

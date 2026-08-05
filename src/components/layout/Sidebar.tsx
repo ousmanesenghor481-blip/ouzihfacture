@@ -130,7 +130,7 @@ export function Sidebar({ collapsed = false, onToggle, className, isMobile = fal
           <p className="text-xs text-blue-100 mb-4 leading-relaxed font-medium">
             Gérez vos factures avec des analyses détaillées et des exports illimités.
           </p>
-          <Link href="/reports" className="block text-center w-full bg-white text-blue-700 hover:bg-blue-50 font-bold text-xs py-2.5 px-4 rounded-xl transition-colors shadow-sm">
+          <Link href="/pricing" className="block text-center w-full bg-white text-blue-700 hover:bg-blue-50 font-bold text-xs py-2.5 px-4 rounded-xl transition-colors shadow-sm">
             Passer Pro
           </Link>
         </div>
