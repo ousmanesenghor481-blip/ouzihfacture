@@ -194,7 +194,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .eq('id', user.id)
       .maybeSingle();
 
-    const realTenantId = profile?.tenant_id || user.id;
+    const targetTenantId = profile?.tenant_id || user.id;
 
     const quotaCheck = await checkInvoiceQuota(user.id);
     if (!quotaCheck.allowed) {
@@ -206,7 +206,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const newInvoice: Invoice = {
       ...newInvData,
       user_id: user.id,
-      tenant_id: realTenantId,
+      tenant_id: targetTenantId,
       id: tempId,
       created_at: now,
       updated_at: now,
@@ -220,7 +220,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .from('invoices')
         .insert({
           user_id: user.id,
-          tenant_id: realTenantId,
+          tenant_id: targetTenantId,
           client_id: newInvData.client_id || null,
           invoice_number: newInvData.invoice_number,
           status: newInvData.status,
@@ -337,7 +337,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .eq('id', user.id)
       .maybeSingle();
 
-    const realTenantId = profile?.tenant_id || user.id;
+    const targetTenantId = profile?.tenant_id || user.id;
 
     const quotaCheck = await checkClientQuota(user.id);
     if (!quotaCheck.allowed) {
@@ -349,7 +349,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const newClient: Client = {
       ...newClientData,
       user_id: user.id,
-      tenant_id: realTenantId,
+      tenant_id: targetTenantId,
       id: tempId,
       created_at: now,
       updated_at: now,
@@ -362,7 +362,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .from('clients')
         .insert({
           user_id: user.id,
-          tenant_id: realTenantId,
+          tenant_id: targetTenantId,
           name: newClientData.name,
           email: newClientData.email || null,
           phone: newClientData.phone || null,
