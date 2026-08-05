@@ -9,6 +9,7 @@ interface PaymentRequest {
   successUrl: string;
   cancelUrl: string;
   ipnUrl: string;
+  customField?: string;
 }
 
 export async function createPaytechPayment(params: PaymentRequest) {
@@ -20,7 +21,7 @@ export async function createPaytechPayment(params: PaymentRequest) {
     console.error('[PayTech Error] PAYTECH_API_KEY ou PAYTECH_API_SECRET manque dans les variables d\'environnement.');
   }
 
-  const payload = {
+  const payload: Record<string, any> = {
     item_name: params.itemName,
     item_price: String(params.itemPrice),
     currency: 'XOF',
@@ -31,6 +32,10 @@ export async function createPaytechPayment(params: PaymentRequest) {
     cancel_url: params.cancelUrl,
     ipn_url: params.ipnUrl,
   };
+
+  if (params.customField) {
+    payload.custom_field = params.customField;
+  }
 
   console.log('[PayTech Request Payload]', JSON.stringify(payload, null, 2));
 

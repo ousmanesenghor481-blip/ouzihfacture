@@ -77,6 +77,7 @@ export async function POST(request: NextRequest) {
       successUrl: `${baseUrl}/dashboard?payment=success`,
       cancelUrl: `${baseUrl}/pricing?payment=cancelled`,
       ipnUrl: `${baseUrl}/api/webhooks/paytech`,
+      customField: JSON.stringify({ tenant_id: user.id, user_id: user.id, plan: planKey }),
     });
 
     console.log('[SUBSCRIBE API] Step 5: PayTech response received:', payment);
