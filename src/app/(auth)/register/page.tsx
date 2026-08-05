@@ -41,8 +41,10 @@ export default function RegisterPage() {
       return;
     }
 
+    const signedUpUser = data.user;
+
     // Auto-login if session was not attached immediately
-    if (!data.session) {
+    if (!data.session && signedUpUser) {
       const { error: loginErr } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -52,6 +54,38 @@ export default function RegisterPage() {
         setErrorMsg(loginErr.message);
         setLoading(false);
         return;
+      }
+    }
+
+    // Safety Guarantee: Ensure profile has tenant_id immediately assigned
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    const activeUserId = currentUser?.id || signedUpUser?.id;
+
+    if (activeUserId) {
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('tenant_id')
+          .eq('id', activeUserId)
+          .maybeSingle();
+
+        if (!profile || !profile.tenant_id) {
+          console.log('[Register] Assigning tenant_id to user profile:', activeUserId);
+          await supabase
+            .from('profiles')
+            .upsert(
+              {
+                id: activeUserId,
+                full_name: fullName,
+                email: email,
+                role: 'owner',
+                tenant_id: activeUserId,
+              },
+              { onConflict: 'id' }
+            );
+        }
+      } catch (err) {
+        console.warn('[Register] Profile tenant_id verification notice:', err);
       }
     }
 
