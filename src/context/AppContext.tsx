@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
-import type { Invoice, Client, CompanySettings, DashboardStats } from "@/types";
+import type { Invoice, Client, CompanySettings, DashboardStats, UserRole, UserProfile } from "@/types";
 import { createClient } from "@/lib/supabase/client";
 import { checkInvoiceQuota, checkClientQuota } from "@/lib/quotas";
 
@@ -11,6 +11,8 @@ interface AppContextType {
   companySettings: CompanySettings;
   stats: DashboardStats;
   loading: boolean;
+  userRole: UserRole;
+  userProfile: UserProfile | null;
   addInvoice: (invoice: Omit<Invoice, "id" | "created_at" | "updated_at">) => Promise<Invoice>;
   updateInvoice: (id: string, updates: Partial<Invoice>) => Promise<void>;
   deleteInvoice: (id: string) => Promise<void>;
@@ -45,6 +47,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [companySettings, setCompanySettings] = useState<CompanySettings>(defaultCompanySettings);
+  const [userRole, setUserRole] = useState<UserRole>('owner');
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -60,6 +64,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       setUserId(user.id);
+
+      // 0. Fetch User Profile and Role
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('id, full_name, email, avatar_url, role')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (profileData) {
+        setUserRole((profileData.role as UserRole) || 'owner');
+        setUserProfile(profileData as UserProfile);
+      } else {
+        setUserRole('owner');
+      }
 
       // 1. Fetch Real Clients from Supabase
       const { data: clientsData } = await supabase
@@ -360,6 +378,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         companySettings,
         stats,
         loading,
+        userRole,
+        userProfile,
         addInvoice,
         updateInvoice,
         deleteInvoice,

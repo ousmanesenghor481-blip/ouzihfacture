@@ -15,9 +15,10 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
+import { Lock } from "lucide-react";
 
 export default function SettingsPage() {
-  const { companySettings, updateSettings } = useApp();
+  const { companySettings, updateSettings, userRole } = useApp();
   const [saved, setSaved] = useState(false);
 
   const [companyName, setCompanyName] = useState(companySettings.company_name);
@@ -28,6 +29,22 @@ export default function SettingsPage() {
   const [taxRate, setTaxRate] = useState(companySettings.default_tax_rate.toString());
   const [currency, setCurrency] = useState(companySettings.currency);
   const [invoicePrefix, setInvoicePrefix] = useState(companySettings.invoice_prefix);
+
+  if (userRole === 'employee') {
+    return (
+      <div className="animate-fade-in max-w-xl mx-auto py-16 px-4 text-center">
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 p-8 rounded-2xl shadow-card">
+          <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Lock className="w-6 h-6" />
+          </div>
+          <h2 className="text-xl font-bold mb-2">Accès réservé au propriétaire</h2>
+          <p className="text-sm text-amber-800 leading-relaxed">
+            Les paramètres de l&apos;entreprise et la configuration de facturation sont réservés exclusivement aux comptes administrateurs (propriétaires).
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   function handleSave() {
     updateSettings({

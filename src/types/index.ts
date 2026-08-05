@@ -76,11 +76,14 @@ export interface DashboardStats {
   overdueCount: number;
 }
 
+export type UserRole = 'owner' | 'employee';
+
 export interface UserProfile {
   id: string;
   full_name: string;
   email: string;
   avatar_url: string | null;
+  role: UserRole;
 }
 
 export interface NavItem {

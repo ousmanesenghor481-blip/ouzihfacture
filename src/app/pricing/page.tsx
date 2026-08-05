@@ -4,11 +4,31 @@ import { PLANS, PlanKey } from '@/lib/plan';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+import { useApp } from '@/context/AppContext';
+import { Lock } from 'lucide-react';
+
 export default function PricingPage() {
   const router = useRouter();
+  const { userRole } = useApp();
   const [loading, setLoading] = useState<PlanKey | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [debugLog, setDebugLog] = useState<string>('Composant PricingPage prêt. En attente d\'action...');
+
+  if (userRole === 'employee') {
+    return (
+      <div className="max-w-xl mx-auto py-16 px-4 text-center">
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 p-8 rounded-2xl shadow-card">
+          <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Lock className="w-6 h-6" />
+          </div>
+          <h2 className="text-xl font-bold mb-2">Accès réservé au propriétaire</h2>
+          <p className="text-sm text-amber-800 leading-relaxed">
+            La souscription et la modification des plans d&apos;abonnement sont réservées au compte propriétaire.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   async function handleSubscribe(planKey: PlanKey) {
     console.log('=== [Pricing Page] HANDLE SUBSCRIBE DÉCLENCHÉ ===', planKey);
