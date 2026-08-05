@@ -183,32 +183,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   async function addInvoice(newInvData: Omit<Invoice, "id" | "created_at" | "updated_at">): Promise<Invoice> {
     const { data: { user } } = await supabase.auth.getUser();
-    const activeUserId = user?.id || userId;
-
-    if (!activeUserId) {
+    if (!user) {
       throw new Error("Utilisateur non connecté. Veuillez vous connecter pour créer une facture.");
     }
 
-    const quotaCheck = await checkInvoiceQuota(activeUserId);
+    // 1. Fetch real tenant_id from profiles table
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    const realTenantId = profile?.tenant_id || user.id;
+
+    const quotaCheck = await checkInvoiceQuota(user.id);
     if (!quotaCheck.allowed) {
       throw new Error(quotaCheck.error || "Limite de factures atteinte.");
     }
-
-    // Resolve tenant_id from profiles table or session user.id
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', activeUserId)
-      .maybeSingle();
-
-    const targetTenantId = profile?.id || activeUserId;
 
     const tempId = `inv-${Date.now()}`;
     const now = new Date().toISOString();
     const newInvoice: Invoice = {
       ...newInvData,
-      user_id: targetTenantId,
-      tenant_id: targetTenantId,
+      user_id: user.id,
+      tenant_id: realTenantId,
       id: tempId,
       created_at: now,
       updated_at: now,
@@ -221,8 +219,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const { data: dbInvoice, error: invErr } = await supabase
         .from('invoices')
         .insert({
-          user_id: targetTenantId,
-          tenant_id: targetTenantId,
+          user_id: user.id,
+          tenant_id: realTenantId,
           client_id: newInvData.client_id || null,
           invoice_number: newInvData.invoice_number,
           status: newInvData.status,
@@ -329,31 +327,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   async function addClient(newClientData: Omit<Client, "id" | "created_at" | "updated_at">): Promise<Client> {
     const { data: { user } } = await supabase.auth.getUser();
-    const activeUserId = user?.id || userId;
-
-    if (!activeUserId) {
+    if (!user) {
       throw new Error("Utilisateur non connecté. Veuillez vous connecter pour enregistrer un client.");
-    }
-
-    const quotaCheck = await checkClientQuota(activeUserId);
-    if (!quotaCheck.allowed) {
-      throw new Error(quotaCheck.error || "Limite de clients atteinte.");
     }
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id')
-      .eq('id', activeUserId)
+      .select('tenant_id')
+      .eq('id', user.id)
       .maybeSingle();
 
-    const targetTenantId = profile?.id || activeUserId;
+    const realTenantId = profile?.tenant_id || user.id;
+
+    const quotaCheck = await checkClientQuota(user.id);
+    if (!quotaCheck.allowed) {
+      throw new Error(quotaCheck.error || "Limite de clients atteinte.");
+    }
 
     const tempId = `client-${Date.now()}`;
     const now = new Date().toISOString();
     const newClient: Client = {
       ...newClientData,
-      user_id: targetTenantId,
-      tenant_id: targetTenantId,
+      user_id: user.id,
+      tenant_id: realTenantId,
       id: tempId,
       created_at: now,
       updated_at: now,
@@ -365,8 +361,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const { data: dbClient, error } = await supabase
         .from('clients')
         .insert({
-          user_id: targetTenantId,
-          tenant_id: targetTenantId,
+          user_id: user.id,
+          tenant_id: realTenantId,
           name: newClientData.name,
           email: newClientData.email || null,
           phone: newClientData.phone || null,
