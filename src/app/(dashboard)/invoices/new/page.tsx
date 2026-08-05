@@ -22,6 +22,7 @@ import {
 import { TVA_RATE } from "@/lib/constants";
 import { cn } from "@/lib/utils/cn";
 import { useApp } from "@/context/AppContext";
+import { QuotaExceededModal } from "@/components/modals/QuotaExceededModal";
 
 interface LineItem {
   id: string;
@@ -78,6 +79,7 @@ export default function NewInvoicePage() {
   const total = calculateTotal(subtotal, taxAmount);
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
 
   async function handleSave(status: "brouillon" | "envoyee") {
     setErrorMsg(null);
@@ -112,9 +114,16 @@ export default function NewInvoicePage() {
       router.push(`/invoices/${created.id}`);
     } catch (err: any) {
       console.error("Invoice creation error:", err);
-      const msg = err?.message || "Erreur lors de la création de la facture";
-      setErrorMsg(msg);
-      alert(msg);
+      const msg = err?.message || "";
+      if (
+        msg.includes("QUOTA_DEPASSE") ||
+        msg.includes("Limite") ||
+        msg.includes("quota")
+      ) {
+        setShowQuotaModal(true);
+        return;
+      }
+      setErrorMsg(msg || "Erreur lors de la création de la facture");
     }
   }
 
@@ -400,6 +409,12 @@ export default function NewInvoicePage() {
           </button>
         </div>
       </div>
+
+      {/* Quota Exceeded Blocking Modal */}
+      <QuotaExceededModal
+        isOpen={showQuotaModal}
+        onClose={() => setShowQuotaModal(false)}
+      />
     </div>
   );
 }

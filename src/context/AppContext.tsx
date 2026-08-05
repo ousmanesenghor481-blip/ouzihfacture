@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import type { Invoice, Client, CompanySettings, DashboardStats, UserRole, UserProfile } from "@/types";
 import { createClient } from "@/lib/supabase/client";
 import { checkInvoiceQuota, checkClientQuota } from "@/lib/quotas";
+import { getTenantQuota, type TenantQuota } from "@/lib/tenantQuotas";
 
 interface AppContextType {
   invoices: Invoice[];
@@ -13,6 +14,9 @@ interface AppContextType {
   loading: boolean;
   userRole: UserRole;
   userProfile: UserProfile | null;
+  tenantQuota: TenantQuota | null;
+  quotaLoading: boolean;
+  refreshTenantQuota: () => Promise<void>;
   addInvoice: (invoice: Omit<Invoice, "id" | "created_at" | "updated_at">) => Promise<Invoice>;
   updateInvoice: (id: string, updates: Partial<Invoice>) => Promise<void>;
   deleteInvoice: (id: string) => Promise<void>;
@@ -49,8 +53,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [companySettings, setCompanySettings] = useState<CompanySettings>(defaultCompanySettings);
   const [userRole, setUserRole] = useState<UserRole>('owner');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [tenantQuota, setTenantQuota] = useState<TenantQuota | null>(null);
+  const [quotaLoading, setQuotaLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
+
+  const refreshTenantQuota = useCallback(async () => {
+    if (!userId) return;
+    setQuotaLoading(true);
+    const q = await getTenantQuota(userId);
+    setTenantQuota(q);
+    setQuotaLoading(false);
+  }, [userId]);
 
   // Fetch all real data from Supabase DB
   const fetchData = useCallback(async () => {
@@ -122,6 +136,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (invoicesData) {
         setInvoices(invoicesData);
       }
+
+      // 4. Fetch Tenant Quotas
+      setQuotaLoading(true);
+      const q = await getTenantQuota(user.id);
+      setTenantQuota(q);
+      setQuotaLoading(false);
     } catch (err) {
       console.warn("Supabase data fetch error:", err);
     } finally {
@@ -201,7 +221,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .select()
           .single();
 
-        if (dbInvoice && !invErr) {
+        if (invErr) {
+          setInvoices((prev) => prev.filter((i) => i.id !== tempId));
+          console.error("Error inserting invoice into Supabase:", invErr);
+          const errStr = (invErr.message || '') + (invErr.details || '') + (invErr.hint || '');
+          if (errStr.includes('QUOTA_DEPASSE') || invErr.code === 'P0001') {
+            throw new Error('QUOTA_DEPASSE');
+          }
+          throw new Error(invErr.message || 'Erreur lors de la création de la facture');
+        }
+
+        if (dbInvoice) {
           if (newInvData.items && newInvData.items.length > 0) {
             const itemsToInsert = newInvData.items.map((item, idx) => ({
               invoice_id: dbInvoice.id,
@@ -216,8 +246,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           await fetchData();
           return dbInvoice;
         }
-      } catch (err) {
+      } catch (err: any) {
+        setInvoices((prev) => prev.filter((i) => i.id !== tempId));
         console.error("Error inserting invoice into Supabase:", err);
+        throw err;
       }
     }
 
@@ -380,6 +412,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loading,
         userRole,
         userProfile,
+        tenantQuota,
+        quotaLoading,
+        refreshTenantQuota,
         addInvoice,
         updateInvoice,
         deleteInvoice,

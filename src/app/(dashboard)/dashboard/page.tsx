@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Plus, FileText, Send, FilePen, CircleCheck } from 'lucide-react';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { RecentInvoicesTable } from '@/components/dashboard/RecentInvoicesTable';
+import { QuotaUsageCard } from '@/components/dashboard/QuotaUsageCard';
 import { mockChartData } from '@/data/mock';
 import { useApp } from '@/context/AppContext';
 
@@ -12,9 +13,9 @@ export default function DashboardPage() {
   const { stats } = useApp();
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-fade-in">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-fade-in space-y-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Tableau de bord</h1>
           <p className="text-sm text-gray-500 mt-1">Vue d'ensemble de votre activité</p>
@@ -27,6 +28,9 @@ export default function DashboardPage() {
           Créer une facture
         </Link>
       </div>
+
+      {/* Tenant Quota Usage Banner */}
+      <QuotaUsageCard />
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
