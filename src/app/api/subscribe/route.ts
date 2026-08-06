@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
         provider_ref: refCommand,
       })
       .select()
-      .single();
+      .maybeSingle();
 
     if (subError) {
       console.warn('[SUBSCRIBE API] Step 3.1 DB Subscription Warning (non-blocking):', subError);

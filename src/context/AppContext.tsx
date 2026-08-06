@@ -82,7 +82,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // 0. Fetch User Profile and Role
       const { data: profileData } = await supabase
         .from('profiles')
-        .select('id, full_name, email, avatar_url, role')
+        .select('id, full_name, email, avatar_url, role, tenant_id')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -90,47 +90,75 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUserRole((profileData.role as UserRole) || 'owner');
         setUserProfile(profileData as UserProfile);
       } else {
-        setUserRole('owner');
+        // Auto-provision profile safely if missing
+        const { data: newProfile } = await supabase
+          .from('profiles')
+          .upsert(
+            {
+              id: user.id,
+              full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Utilisateur',
+              email: user.email,
+              role: 'owner',
+              tenant_id: user.id,
+            },
+            { onConflict: 'id' }
+          )
+          .select('id, full_name, email, avatar_url, role, tenant_id')
+          .maybeSingle();
+
+        if (newProfile) {
+          setUserRole((newProfile.role as UserRole) || 'owner');
+          setUserProfile(newProfile as UserProfile);
+        } else {
+          setUserRole('owner');
+        }
       }
 
-      // 1. Fetch Real Clients from Supabase
+      // 1. Fetch Real Clients from Supabase (scoped to user.id)
       const { data: clientsData } = await supabase
         .from('clients')
         .select('*')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       if (clientsData) {
         setClients(clientsData);
       }
 
-      // 2. Fetch Real Company Settings from Supabase
+      // 2. Fetch Real Company Settings from Supabase (scoped to user.id)
       const { data: settingsData } = await supabase
         .from('company_settings')
         .select('*')
+        .eq('user_id', user.id)
         .maybeSingle();
 
       if (settingsData) {
         setCompanySettings(settingsData);
       } else {
-        // Auto-create settings record if not found
+        // Auto-create settings record safely with upsert
         const { data: newSettings } = await supabase
           .from('company_settings')
-          .insert({
-            user_id: user.id,
-            company_name: user.user_metadata?.company_name || 'Mon Entreprise',
-            company_email: user.email,
-          })
+          .upsert(
+            {
+              user_id: user.id,
+              company_name: user.user_metadata?.company_name || 'Mon Entreprise',
+              company_email: user.email,
+            },
+            { onConflict: 'user_id' }
+          )
           .select()
-          .single();
+          .maybeSingle();
+
         if (newSettings) {
           setCompanySettings(newSettings);
         }
       }
 
-      // 3. Fetch Real Invoices with Items & Clients from Supabase
+      // 3. Fetch Real Invoices with Items & Clients from Supabase (scoped to user.id)
       const { data: invoicesData } = await supabase
         .from('invoices')
         .select('*, items:invoice_items(*), client:clients(*)')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       if (invoicesData) {
