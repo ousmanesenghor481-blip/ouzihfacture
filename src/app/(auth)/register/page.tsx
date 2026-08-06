@@ -25,47 +25,84 @@ export default function RegisterPage() {
     setErrorMsg(null);
 
     try {
-      // 1. Call robust server-side registration API (auto-confirms email and provisions multi-tenant records)
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fullName,
-          companyName,
-          email,
-          password,
-        }),
-      });
+      // 1. Try robust server API route
+      let registrationSuccess = false;
 
-      const resData = await res.json().catch(() => ({}));
+      try {
+        const res = await fetch("/api/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fullName,
+            companyName,
+            email,
+            password,
+          }),
+        });
 
-      if (!res.ok || resData.error) {
-        const errorText =
-          typeof resData.error === "string"
-            ? resData.error
-            : resData.error?.message || "Erreur lors de la création du compte.";
-        setErrorMsg(errorText);
-        setLoading(false);
-        return;
+        const resData = await res.json().catch(() => ({}));
+
+        if (res.ok && !resData.error) {
+          registrationSuccess = true;
+        } else if (resData.error) {
+          console.warn("[Register Component] API Route Error Message:", resData.error);
+          if (typeof resData.error === "string" && resData.error.includes("déjà")) {
+            setErrorMsg(resData.error);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (apiErr) {
+        console.warn("[Register Component] Server API fetch failed, trying client signUp fallback:", apiErr);
       }
 
-      // 2. Sign in with password to attach browser session
+      // 2. Client SignUp Fallback if API route was not used or failed
+      if (!registrationSuccess) {
+        const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: fullName,
+              company_name: companyName,
+            },
+          },
+        });
+
+        if (signUpErr) {
+          setErrorMsg(signUpErr.message || "Erreur lors de la création du compte.");
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 3. Attach Session with signInWithPassword
       const { error: loginErr } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (loginErr) {
-        const loginMsg = typeof loginErr === "string" ? loginErr : loginErr.message || "Compte créé, veuillez vous connecter.";
-        setErrorMsg(loginMsg);
-        setLoading(false);
-        return;
+        console.warn("[Register Component] Post-signup login warning:", loginErr);
+      }
+
+      // 4. Ensure profile and company_settings exist
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (currentUser) {
+        await supabase.from('profiles').upsert(
+          { id: currentUser.id, full_name: fullName, email, role: 'owner', tenant_id: currentUser.id },
+          { onConflict: 'id' }
+        );
+        await supabase.from('company_settings').upsert(
+          { user_id: currentUser.id, company_name: companyName, company_email: email },
+          { onConflict: 'user_id' }
+        );
       }
 
       router.push("/dashboard");
       router.refresh();
     } catch (err: any) {
-      console.error("[Register Component Error]", err);
+      console.error("[Register Component Fatal Catch]", err);
       const msg =
         typeof err === "string"
           ? err

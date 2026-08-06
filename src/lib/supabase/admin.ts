@@ -1,11 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 
 export function createAdminClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://qevkhngxdrpjjrjgecwp.supabase.co';
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error('Supabase URL or Service Role Key is missing in environment variables.');
+  if (!serviceRoleKey) {
+    console.warn('[Admin Client] SUPABASE_SERVICE_ROLE_KEY is missing in environment variables.');
+    return null;
   }
 
   return createClient(supabaseUrl, serviceRoleKey, {

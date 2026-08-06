@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { createClient as createServerSupabase } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,119 +14,73 @@ export async function POST(request: NextRequest) {
     }
 
     const adminSupabase = createAdminClient();
+    let userId: string | null = null;
 
-    // 1. Create authenticated user with email_confirm = true (bypassing email confirmation blocks)
-    const { data: userData, error: createErr } = await adminSupabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: {
-        full_name: fullName,
-        company_name: companyName,
-      },
-    });
-
-    if (createErr) {
-      console.warn('[Register API] User creation error:', createErr);
-      const msg = createErr.message || String(createErr);
-      if (msg.includes('already registered') || msg.includes('already exists') || createErr.status === 422) {
-        return NextResponse.json(
-          { error: 'Un compte existe déjà avec cette adresse email. Veuillez vous connecter.' },
-          { status: 400 }
-        );
-      }
-      return NextResponse.json({ error: msg }, { status: 400 });
-    }
-
-    const newUser = userData.user;
-    if (!newUser) {
-      return NextResponse.json({ error: 'Échec de création du compte utilisateur.' }, { status: 500 });
-    }
-
-    const userId = newUser.id;
-
-    // 2. Generate clean unique slug
-    const cleanCompany = companyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'entreprise';
-    const slug = `${cleanCompany}-${userId.slice(0, 8)}`;
-
-    // 3. Atomically provision Tenants table (id, name, slug, owner_user_id)
-    const { error: tenantErr } = await adminSupabase
-      .from('tenants')
-      .upsert(
-        {
-          id: userId,
-          name: companyName,
-          slug,
-          owner_user_id: userId,
-        },
-        { onConflict: 'id' }
-      );
-
-    if (tenantErr) {
-      console.warn('[Register API] Tenants upsert warning:', tenantErr);
-    }
-
-    // 4. Atomically provision Profiles table
-    const { error: profileErr } = await adminSupabase
-      .from('profiles')
-      .upsert(
-        {
-          id: userId,
+    if (adminSupabase) {
+      // Admin client mode: create user with auto email confirmation
+      const { data: userData, error: createErr } = await adminSupabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: {
           full_name: fullName,
-          email,
-          role: 'owner',
-          tenant_id: userId,
-        },
-        { onConflict: 'id' }
-      );
-
-    if (profileErr) {
-      console.warn('[Register API] Profiles upsert warning:', profileErr);
-    }
-
-    // 5. Atomically provision Company Settings table
-    const { error: settingsErr } = await adminSupabase
-      .from('company_settings')
-      .upsert(
-        {
-          user_id: userId,
           company_name: companyName,
-          company_email: email,
         },
-        { onConflict: 'user_id' }
-      );
+      });
 
-    if (settingsErr) {
-      console.warn('[Register API] Company settings upsert warning:', settingsErr);
-    }
+      if (createErr) {
+        console.warn('[Register API] Admin createUser notice:', createErr);
+        const msg = createErr.message || String(createErr);
+        if (msg.includes('already registered') || msg.includes('already exists') || createErr.status === 422) {
+          return NextResponse.json(
+            { error: 'Un compte existe déjà avec cette adresse email. Veuillez vous connecter.' },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({ error: msg }, { status: 400 });
+      }
 
-    // 6. Atomically provision Tenant Quotas table
-    const { error: quotaErr } = await adminSupabase
-      .from('tenant_quotas')
-      .upsert(
-        {
-          user_id: userId,
-          tenant_id: userId,
-          max_invoices: 5,
-          invoices_used: 0,
+      userId = userData.user?.id || null;
+
+      if (userId) {
+        // Provision multi-tenant records using Service Role Key
+        const cleanCompany = companyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'entreprise';
+        const slug = `${cleanCompany}-${userId.slice(0, 8)}`;
+
+        await adminSupabase.from('tenants').upsert({ id: userId, name: companyName, slug, owner_user_id: userId }, { onConflict: 'id' });
+        await adminSupabase.from('profiles').upsert({ id: userId, full_name: fullName, email, role: 'owner', tenant_id: userId }, { onConflict: 'id' });
+        await adminSupabase.from('company_settings').upsert({ user_id: userId, company_name: companyName, company_email: email }, { onConflict: 'user_id' });
+        await adminSupabase.from('tenant_quotas').upsert({ user_id: userId, tenant_id: userId, max_invoices: 5, invoices_used: 0 }, { onConflict: 'user_id' });
+      }
+    } else {
+      // Standard server client fallback mode
+      const supabase = createServerSupabase();
+      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+            company_name: companyName,
+          },
         },
-        { onConflict: 'user_id' }
-      );
+      });
 
-    if (quotaErr) {
-      console.warn('[Register API] Tenant quotas upsert warning:', quotaErr);
+      if (signUpErr) {
+        return NextResponse.json({ error: signUpErr.message }, { status: 400 });
+      }
+
+      userId = signUpData.user?.id || null;
     }
-
-    console.log('[Register API] Account & Multi-tenant records successfully provisioned for user:', userId);
 
     return NextResponse.json({
       success: true,
-      message: 'Compte et entreprise créés avec succès.',
+      message: 'Compte créé avec succès.',
       userId,
     });
   } catch (err: any) {
     console.error('[Register API] Catch fatal error:', err);
-    const msg = err?.message || typeof err === 'string' ? err : 'Erreur serveur lors de l\'inscription.';
+    const msg = typeof err === 'string' ? err : err?.message || 'Erreur serveur lors de l\'inscription.';
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
