@@ -24,73 +24,55 @@ export default function RegisterPage() {
     setLoading(true);
     setErrorMsg(null);
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
-          company_name: companyName,
-        },
-      },
-    });
+    try {
+      // 1. Call robust server-side registration API (auto-confirms email and provisions multi-tenant records)
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName,
+          companyName,
+          email,
+          password,
+        }),
+      });
 
-    if (error) {
-      setErrorMsg(error.message);
-      setLoading(false);
-      return;
-    }
+      const resData = await res.json().catch(() => ({}));
 
-    const signedUpUser = data.user;
+      if (!res.ok || resData.error) {
+        const errorText =
+          typeof resData.error === "string"
+            ? resData.error
+            : resData.error?.message || "Erreur lors de la création du compte.";
+        setErrorMsg(errorText);
+        setLoading(false);
+        return;
+      }
 
-    // Auto-login if session was not attached immediately
-    if (!data.session && signedUpUser) {
+      // 2. Sign in with password to attach browser session
       const { error: loginErr } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (loginErr) {
-        setErrorMsg(loginErr.message);
+        const loginMsg = typeof loginErr === "string" ? loginErr : loginErr.message || "Compte créé, veuillez vous connecter.";
+        setErrorMsg(loginMsg);
         setLoading(false);
         return;
       }
+
+      router.push("/dashboard");
+      router.refresh();
+    } catch (err: any) {
+      console.error("[Register Component Error]", err);
+      const msg =
+        typeof err === "string"
+          ? err
+          : err?.message || "Une erreur inattendue est survenue lors de l'inscription.";
+      setErrorMsg(msg);
+      setLoading(false);
     }
-
-    // Safety Guarantee: Ensure profile has tenant_id immediately assigned
-    const { data: { user: currentUser } } = await supabase.auth.getUser();
-    const activeUserId = currentUser?.id || signedUpUser?.id;
-
-    if (activeUserId) {
-      try {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('tenant_id')
-          .eq('id', activeUserId)
-          .maybeSingle();
-
-        if (!profile || !profile.tenant_id) {
-          console.log('[Register] Assigning tenant_id to user profile:', activeUserId);
-          await supabase
-            .from('profiles')
-            .upsert(
-              {
-                id: activeUserId,
-                full_name: fullName,
-                email: email,
-                role: 'owner',
-                tenant_id: activeUserId,
-              },
-              { onConflict: 'id' }
-            );
-        }
-      } catch (err) {
-        console.warn('[Register] Profile tenant_id verification notice:', err);
-      }
-    }
-
-    router.push("/dashboard");
-    router.refresh();
   }
 
   return (
