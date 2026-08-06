@@ -54,95 +54,51 @@ export default function RegisterPage() {
     setErrorMsg(null);
 
     try {
-      // Step 0: Check if user already exists by attempting instant sign-in
-      const { data: directSignIn } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      // 1. Call server API route /api/auth/register (creates account with auto email confirmation & multi-tenant records)
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName,
+          companyName,
+          email,
+          password,
+        }),
       });
 
-      if (directSignIn?.session?.user) {
-        const currentUser = directSignIn.session.user;
-        await supabase.from('profiles').upsert(
-          { id: currentUser.id, full_name: fullName || 'Utilisateur', email, role: 'owner', tenant_id: currentUser.id },
-          { onConflict: 'id' }
-        );
-        await supabase.from('company_settings').upsert(
-          { user_id: currentUser.id, company_name: companyName || 'Mon Entreprise', company_email: email },
-          { onConflict: 'user_id' }
-        );
-        router.push("/dashboard");
-        router.refresh();
-        return;
-      }
+      const resData = await res.json().catch(() => ({}));
 
-      // Step 1: Call server API route /api/auth/register
-      let registrationSuccess = false;
-      try {
-        const res = await fetch("/api/auth/register", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fullName,
-            companyName,
+      if (!res.ok || resData.error) {
+        // If user already exists, attempt automatic login
+        if (resData.error && typeof resData.error === "string" && resData.error.includes("déjà")) {
+          const { error: directLoginErr } = await supabase.auth.signInWithPassword({
             email,
             password,
-          }),
-        });
+          });
 
-        const resData = await res.json().catch(() => ({}));
-
-        if (res.ok && !resData.error) {
-          registrationSuccess = true;
-        } else if (resData.error) {
-          console.warn("[Register Component] Server API notice:", resData.error);
-          if (typeof resData.error === "string" && resData.error.includes("déjà")) {
-            // Account exists! Sign in and redirect to dashboard
-            const { error: postLoginErr } = await supabase.auth.signInWithPassword({ email, password });
-            if (!postLoginErr) {
-              router.push("/dashboard");
-              router.refresh();
-              return;
-            }
-            setFormattedError(resData.error);
-            setLoading(false);
+          if (!directLoginErr) {
+            router.push("/dashboard");
+            router.refresh();
             return;
           }
         }
-      } catch (apiErr) {
-        console.warn("[Register Component] API Route fetch failed, using browser fallback:", apiErr);
+
+        setFormattedError(resData.error || "Erreur lors de la création du compte.");
+        setLoading(false);
+        return;
       }
 
-      // Step 2: Browser SignUp Fallback
-      if (!registrationSuccess) {
-        const { error: signUpErr } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              full_name: fullName,
-              company_name: companyName,
-            },
-          },
-        });
-
-        if (signUpErr) {
-          setFormattedError(signUpErr);
-          setLoading(false);
-          return;
-        }
-      }
-
-      // Step 3: Attach Session with signInWithPassword
+      // 2. Sign in with password to attach browser session
       const { error: loginErr } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (loginErr) {
-        console.warn("[Register Component] Post-signup login notice:", loginErr);
+        console.warn("[Register Page] Post-signup login warning:", loginErr);
       }
 
-      // Step 4: Ensure profile and company_settings exist
+      // 3. Guarantee frontend profile & company_settings fallback
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (currentUser) {
         await supabase.from('profiles').upsert(
@@ -158,7 +114,7 @@ export default function RegisterPage() {
       router.push("/dashboard");
       router.refresh();
     } catch (err: any) {
-      console.error("[Register Component Fatal Catch]", err);
+      console.error("[Register Page Fatal Catch]", err);
       setFormattedError(err);
       setLoading(false);
     }
