@@ -17,7 +17,9 @@ export async function POST(request: NextRequest) {
 
     const { fullName, companyName, email, password } = body || {};
 
-    console.log('[REGISTER API] Inscription reçue:', {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'Non définie';
+    console.log('[REGISTER API DEBUG] Inscription reçue:', {
+      supabaseUrl,
       fullName,
       companyName,
       email,
@@ -66,7 +68,7 @@ export async function POST(request: NextRequest) {
     let usedAdminMode = false;
 
     if (adminSupabase) {
-      console.log('[REGISTER API] Exécution de admin.createUser pour l\'email:', email);
+      console.log(`[REGISTER API DEBUG] Exécution de admin.createUser sur URL: ${supabaseUrl} pour l'email: ${email}`);
       
       const { data: userData, error: createErr } = await adminSupabase.auth.admin.createUser({
         email: email.trim().toLowerCase(),
@@ -89,7 +91,6 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // If AuthRetryableFetchError or 500 error, fallback to standard client signUp
         console.warn('[REGISTER API] AuthRetryableFetchError intercepté, bascule vers le client standard signUp...');
       } else {
         userId = userData.user?.id || null;
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
 
     // Fallback standard signUp if admin mode was not used or failed
     if (!userId) {
-      console.log('[REGISTER API] Exécution du client standard signUp pour l\'email:', email);
+      console.log(`[REGISTER API DEBUG] Exécution du client standard signUp sur URL: ${supabaseUrl} pour l'email: ${email}`);
       const supabase = createServerSupabase();
       const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
