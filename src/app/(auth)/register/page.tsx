@@ -28,24 +28,25 @@ export default function RegisterPage() {
       setErrorMsg(err);
       return;
     }
-    if (typeof err === "object") {
-      if (err.error && typeof err.error === "string") {
-        setErrorMsg(err.error);
+    if (typeof err === "object" && err !== null) {
+      const target = err.error || err.message || err.details || err.msg;
+      if (typeof target === "string" && target.trim()) {
+        setErrorMsg(target);
         return;
       }
-      if (err.message && typeof err.message === "string") {
-        setErrorMsg(err.message);
+      if (typeof target === "object" && target !== null && typeof target.message === "string") {
+        setErrorMsg(target.message);
         return;
       }
       try {
-        const str = JSON.stringify(err);
-        if (str !== "{}" && str !== "[]") {
-          setErrorMsg(str);
+        const json = JSON.stringify(err);
+        if (json !== "{}" && json !== "[]") {
+          setErrorMsg(json);
           return;
         }
       } catch (e) {}
     }
-    setErrorMsg("Une erreur est survenue lors de l'inscription. Veuillez réessayer.");
+    setErrorMsg("Une erreur est survenue lors de l'inscription. Veuillez vérifier vos informations.");
   }
 
   async function handleRegister(e: React.FormEvent) {
@@ -54,59 +55,106 @@ export default function RegisterPage() {
     setErrorMsg(null);
 
     try {
-      // 1. Call server API route /api/auth/register (creates account with auto email confirmation & multi-tenant records)
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fullName,
-          companyName,
-          email,
-          password,
-        }),
+      // Step 0: Check if user already exists by attempting instant sign-in
+      const { data: directSignIn } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
       });
 
-      const resData = await res.json().catch(() => ({}));
-
-      if (!res.ok || resData.error) {
-        // If user already exists, attempt automatic login
-        if (resData.error && typeof resData.error === "string" && resData.error.includes("déjà")) {
-          const { error: directLoginErr } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-          });
-
-          if (!directLoginErr) {
-            router.push("/dashboard");
-            router.refresh();
-            return;
-          }
-        }
-
-        setFormattedError(resData.error || "Erreur lors de la création du compte.");
-        setLoading(false);
+      if (directSignIn?.session?.user) {
+        const currentUser = directSignIn.session.user;
+        await supabase.from('profiles').upsert(
+          { id: currentUser.id, full_name: fullName || 'Utilisateur', email: email.trim().toLowerCase(), role: 'owner', tenant_id: currentUser.id },
+          { onConflict: 'id' }
+        );
+        await supabase.from('company_settings').upsert(
+          { user_id: currentUser.id, company_name: companyName || 'Mon Entreprise', company_email: email.trim().toLowerCase() },
+          { onConflict: 'user_id' }
+        );
+        router.push("/dashboard");
+        router.refresh();
         return;
       }
 
-      // 2. Sign in with password to attach browser session
+      // Step 1: Call server API route /api/auth/register
+      let registrationSuccess = false;
+      try {
+        const res = await fetch("/api/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fullName,
+            companyName,
+            email,
+            password,
+          }),
+        });
+
+        const resData = await res.json().catch(() => ({}));
+
+        if (res.ok && !resData.error) {
+          registrationSuccess = true;
+        } else if (resData.error) {
+          console.warn("[Register Component] Server API error:", resData.error);
+          const errorMsgStr = typeof resData.error === 'string' ? resData.error : resData.error?.message || JSON.stringify(resData.error);
+
+          if (errorMsgStr.includes("déjà")) {
+            // Account exists! Try to log in
+            const { error: postLoginErr } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
+            if (!postLoginErr) {
+              router.push("/dashboard");
+              router.refresh();
+              return;
+            }
+          }
+          
+          setFormattedError(errorMsgStr);
+          setLoading(false);
+          return;
+        }
+      } catch (apiErr) {
+        console.warn("[Register Component] API Route fetch failed, using browser fallback:", apiErr);
+      }
+
+      // Step 2: Browser SignUp Fallback
+      if (!registrationSuccess) {
+        const { error: signUpErr } = await supabase.auth.signUp({
+          email: email.trim().toLowerCase(),
+          password,
+          options: {
+            data: {
+              full_name: fullName,
+              company_name: companyName,
+            },
+          },
+        });
+
+        if (signUpErr) {
+          setFormattedError(signUpErr);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Step 3: Attach Session with signInWithPassword
       const { error: loginErr } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim().toLowerCase(),
         password,
       });
 
       if (loginErr) {
-        console.warn("[Register Page] Post-signup login warning:", loginErr);
+        console.warn("[Register Component] Post-signup login notice:", loginErr);
       }
 
-      // 3. Guarantee frontend profile & company_settings fallback
+      // Step 4: Ensure profile and company_settings exist
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (currentUser) {
         await supabase.from('profiles').upsert(
-          { id: currentUser.id, full_name: fullName || 'Utilisateur', email, role: 'owner', tenant_id: currentUser.id },
+          { id: currentUser.id, full_name: fullName || 'Utilisateur', email: email.trim().toLowerCase(), role: 'owner', tenant_id: currentUser.id },
           { onConflict: 'id' }
         );
         await supabase.from('company_settings').upsert(
-          { user_id: currentUser.id, company_name: companyName || 'Mon Entreprise', company_email: email },
+          { user_id: currentUser.id, company_name: companyName || 'Mon Entreprise', company_email: email.trim().toLowerCase() },
           { onConflict: 'user_id' }
         );
       }
@@ -114,7 +162,7 @@ export default function RegisterPage() {
       router.push("/dashboard");
       router.refresh();
     } catch (err: any) {
-      console.error("[Register Page Fatal Catch]", err);
+      console.error("[Register Component Fatal Catch]", err);
       setFormattedError(err);
       setLoading(false);
     }
